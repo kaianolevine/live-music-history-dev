@@ -27,4 +27,4 @@ jobs:
         run: poetry install
 
       - name: Run live music history update script
-        run: poetry run python -u src/tools/live_music_history/update_recent_history.py
+        run: poetry run python src/live_music_history/update_recent_history.py
