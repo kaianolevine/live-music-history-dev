@@ -1,4 +1,5 @@
-name: Update Live Music History
+name: Update Live Music
+run-name: Update Live Music (${{ github.event_name }})
 
 on:
   workflow_dispatch:
