@@ -9,23 +9,91 @@ import kaiano_common_utils.m3u_parsing as m3u_parsing
 import pytz
 from googleapiclient.errors import HttpError
 
+# --- COMMON HELPERS (good candidates to move into kaiano_common_utils) ---
+
+
+def a1_range(
+    col_start: str,
+    row_start: int,
+    col_end: str | None = None,
+    row_end: int | None = None,
+) -> str:
+    """Build an A1 range like 'A5:C10' or 'A5:C'.
+
+    If row_end is None, returns an open-ended range ending at the given column (e.g., 'A5:C').
+    """
+    if col_end is None:
+        col_end = col_start
+    if row_end is None:
+        return f"{col_start}{row_start}:{col_end}"
+    return f"{col_start}{row_start}:{col_end}{row_end}"
+
+
+def sheets_clear_values(sheets_service, spreadsheet_id: str, a1: str) -> None:
+    sheet = sheets_service.spreadsheets()
+    sheet.values().clear(spreadsheetId=spreadsheet_id, range=a1).execute()
+
+
+def sheets_update_values(
+    sheets_service,
+    spreadsheet_id: str,
+    a1: str,
+    values: list[list[str]],
+    *,
+    value_input_option: str = "RAW",
+) -> None:
+    sheet = sheets_service.spreadsheets()
+    sheet.values().update(
+        spreadsheetId=spreadsheet_id,
+        range=a1,
+        valueInputOption=value_input_option,
+        body={"values": values},
+    ).execute()
+
+
+def sheets_get_values(sheets_service, spreadsheet_id: str, a1: str) -> list[list[str]]:
+    sheet = sheets_service.spreadsheets()
+    result = sheet.values().get(spreadsheetId=spreadsheet_id, range=a1).execute()
+    return result.get("values", [])
+
+
+def normalize_cell(value: str) -> str:
+    return (value or "").strip()
+
+
+def build_dedup_key(row: list[str]) -> str:
+    """Build a stable, case-insensitive dedupe key for [datetime, title, artist]."""
+    return "||".join(normalize_cell(c).casefold() for c in row[:3])
+
+
+def build_dedup_keys(rows: list[list[str]]) -> set[str]:
+    return {build_dedup_key(r) for r in rows}
+
 
 def build_youtube_links(entries):
+    """Build YouTube search URLs.
+
+    NOTE: We intentionally write raw URLs (not =HYPERLINK formulas) because
+    Google Sheets' click/preview redirect layer can be blocked in some
+    environments. Raw URLs tend to open directly across more browsers and
+    network policies.
+    """
     links = []
     for _, title, artist in entries:
         query = urlencode({"search_query": f"{title} {artist}"})
         url = f"https://www.youtube.com/results?{query}"
         log.debug("YouTube link: %s", url)
-        links.append([f'=HYPERLINK("{url}", "YouTube Search")'])
+        links.append([url])
     return links
 
 
 def write_entries_to_sheet(sheets_service, entries, now):
-    sheet = sheets_service.spreadsheets()
     log.info("Clearing old entries in sheet range A5:D...")
-    sheet.values().clear(
-        spreadsheetId=config.LIVE_HISTORY_SPREADSHEET_ID, range="A5:D"
-    ).execute()
+    sheets_clear_values(
+        sheets_service,
+        config.LIVE_HISTORY_SPREADSHEET_ID,
+        a1_range("A", 5, "D"),
+    )
 
     if not entries:
         log.info("No entries to write. Writing NO_HISTORY message.")
@@ -34,33 +102,44 @@ def write_entries_to_sheet(sheets_service, entries, now):
             "A5:B5",
             [[log.format_date(now), config.NO_HISTORY]],
         )
-        sheet.values().update(
-            spreadsheetId=config.LIVE_HISTORY_SPREADSHEET_ID,
-            range="A5:B5",
-            valueInputOption="RAW",
-            body={"values": [[log.format_date(now), config.NO_HISTORY]]},
-        ).execute()
+        sheets_update_values(
+            sheets_service,
+            config.LIVE_HISTORY_SPREADSHEET_ID,
+            "A5:B5",
+            [[log.format_date(now), config.NO_HISTORY]],
+            value_input_option="RAW",
+        )
         return
 
     log.info("Writing %d entries to sheet...", len(entries))
-    log.debug("Sheet write range: %s, entries: %s", f"A5:C{5+len(entries)-1}", entries)
-    sheet.values().update(
-        spreadsheetId=config.LIVE_HISTORY_SPREADSHEET_ID,
-        range=f"A5:C{5+len(entries)-1}",
-        valueInputOption="RAW",
-        body={"values": entries},
-    ).execute()
+    log.debug(
+        "Sheet write range: %s, entries: %s",
+        a1_range("A", 5, "C", 5 + len(entries) - 1),
+        entries,
+    )
+    sheets_update_values(
+        sheets_service,
+        config.LIVE_HISTORY_SPREADSHEET_ID,
+        a1_range("A", 5, "C", 5 + len(entries) - 1),
+        entries,
+        value_input_option="RAW",
+    )
 
     try:
         log.info("Writing %d links to sheet...", len(entries))
         links = build_youtube_links(entries)
-        log.debug("Link write range: %s, links: %s", f"D5:D{5+len(links)-1}", links)
-        sheet.values().update(
-            spreadsheetId=config.LIVE_HISTORY_SPREADSHEET_ID,
-            range=f"D5:D{5+len(links)-1}",
-            valueInputOption="USER_ENTERED",
-            body={"values": links},
-        ).execute()
+        log.debug(
+            "Link write range: %s, links: %s",
+            a1_range("D", 5, "D", 5 + len(links) - 1),
+            links,
+        )
+        sheets_update_values(
+            sheets_service,
+            config.LIVE_HISTORY_SPREADSHEET_ID,
+            a1_range("D", 5, "D", 5 + len(links) - 1),
+            links,
+            value_input_option="RAW",
+        )
         log.info("Finished writing entries and links to sheet.")
     except HttpError as e:
         log.warning("Skipping YouTube links due to sheet restriction: %s", e)
@@ -78,16 +157,14 @@ def _parse_entry_dt(value: str) -> datetime.datetime | None:
 
 
 def read_existing_entries(sheets_service):
-    sheet = sheets_service.spreadsheets()
     log.info("Reading existing entries from sheet...")
-    result = (
-        sheet.values()
-        .get(spreadsheetId=config.LIVE_HISTORY_SPREADSHEET_ID, range="A5:C")
-        .execute()
+    values = sheets_get_values(
+        sheets_service,
+        config.LIVE_HISTORY_SPREADSHEET_ID,
+        a1_range("A", 5, "C"),
     )
-    values = result.get("values", [])
 
-    existing_data = []
+    existing_data: list[list[str]] = []
     for row in values:
         if len(row) >= 2 and row[1] != config.NO_HISTORY:
             dt = _parse_entry_dt(row[0])
@@ -100,14 +177,14 @@ def read_existing_entries(sheets_service):
 
 
 def update_last_run_time(sheets_service, now):
-    sheet = sheets_service.spreadsheets()
     log.info("Updating last run time in sheet...")
-    sheet.values().update(
-        spreadsheetId=config.LIVE_HISTORY_SPREADSHEET_ID,
-        range="A3",
-        valueInputOption="RAW",
-        body={"values": [[log.format_date(now)]]},
-    ).execute()
+    sheets_update_values(
+        sheets_service,
+        config.LIVE_HISTORY_SPREADSHEET_ID,
+        "A3",
+        [[log.format_date(now)]],
+        value_input_option="RAW",
+    )
 
 
 def publish_history(drive_service, sheets_service):
@@ -121,23 +198,25 @@ def publish_history(drive_service, sheets_service):
     m3u_file = m3u_parsing.get_most_recent_m3u_file(drive_service)
     if not m3u_file:
         log.info("No .m3u files found. Clearing sheet and writing NO_HISTORY.")
-        sheet = sheets_service.spreadsheets()
-        sheet.values().clear(
-            spreadsheetId=config.LIVE_HISTORY_SPREADSHEET_ID, range="A5:D"
-        ).execute()
-        sheet.values().update(
-            spreadsheetId=config.LIVE_HISTORY_SPREADSHEET_ID,
-            range="A5:B5",
-            valueInputOption="RAW",
-            body={"values": [[log.format_date(now), config.NO_HISTORY]]},
-        ).execute()
+        sheets_clear_values(
+            sheets_service,
+            config.LIVE_HISTORY_SPREADSHEET_ID,
+            a1_range("A", 5, "D"),
+        )
+        sheets_update_values(
+            sheets_service,
+            config.LIVE_HISTORY_SPREADSHEET_ID,
+            "A5:B5",
+            [[log.format_date(now), config.NO_HISTORY]],
+            value_input_option="RAW",
+        )
         return
 
     lines = m3u_parsing.download_m3u_file(drive_service, m3u_file["id"])
     file_date_str = m3u_file["name"].replace(".m3u", "").strip()
 
     existing_data = read_existing_entries(sheets_service)
-    existing_keys = {"||".join(c.strip().lower() for c in r) for r in existing_data}
+    existing_keys = build_dedup_keys(existing_data)
 
     new_entries = m3u_parsing.parse_m3u_lines(lines, existing_keys, file_date_str)
 
@@ -163,10 +242,8 @@ def publish_history(drive_service, sheets_service):
 
 
 if __name__ == "__main__":
-    # import tools.private_history.update_private_history as private_history
 
     drive_service = google_drive.get_drive_service()
     sheets_service = google_sheets.get_sheets_service()
 
     publish_history(drive_service, sheets_service)
-    # private_history.publish_private_history(drive_service, sheets_service)
