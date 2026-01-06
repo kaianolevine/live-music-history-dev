@@ -11,20 +11,12 @@ from googleapiclient.errors import HttpError
 
 
 def build_youtube_links(entries):
-    """Build YouTube search URLs.
-
-    NOTE: We intentionally write raw URLs (not =HYPERLINK formulas) because
-    Google Sheets' click/preview redirect layer can be blocked in some
-    environments. Raw URLs tend to open directly across more browsers and
-    network policies.
-    """
     links = []
     for _, title, artist in entries:
         query = urlencode({"search_query": f"{title} {artist}"})
         url = f"https://www.youtube.com/results?{query}"
         log.debug("YouTube link: %s", url)
-        # Write the raw URL; Sheets will auto-link it.
-        links.append([url])
+        links.append([f'=HYPERLINK("{url}", "YouTube Search")'])
     return links
 
 
@@ -66,7 +58,7 @@ def write_entries_to_sheet(sheets_service, entries, now):
         sheet.values().update(
             spreadsheetId=config.LIVE_HISTORY_SPREADSHEET_ID,
             range=f"D5:D{5+len(links)-1}",
-            valueInputOption="RAW",
+            valueInputOption="USER_ENTERED",
             body={"values": links},
         ).execute()
         log.info("Finished writing entries and links to sheet.")
