@@ -70,7 +70,14 @@ def write_entries_to_sheet(sheets_service, entries, now):
 # --- SHEET READING AND PUBLISHING HISTORY ---
 
 
-def read_existing_entries(sheets_service, cutoff):
+def _parse_entry_dt(value: str) -> datetime.datetime | None:
+    try:
+        return datetime.datetime.strptime(value, "%Y-%m-%d %H:%M")
+    except Exception:
+        return None
+
+
+def read_existing_entries(sheets_service):
     sheet = sheets_service.spreadsheets()
     log.info("Reading existing entries from sheet...")
     result = (
@@ -79,17 +86,16 @@ def read_existing_entries(sheets_service, cutoff):
         .execute()
     )
     values = result.get("values", [])
+
     existing_data = []
     for row in values:
         if len(row) >= 2 and row[1] != config.NO_HISTORY:
-            try:
-                dt = datetime.datetime.strptime(row[0], "%Y-%m-%d %H:%M")
-                if dt >= cutoff:
-                    existing_data.append(row[:3])
-            except Exception:
-                pass
-    log.info("Found %d existing entries after cutoff.", len(existing_data))
-    log.debug("Existing entries after filtering: %s", existing_data)
+            dt = _parse_entry_dt(row[0])
+            if dt is None:
+                continue
+            existing_data.append(row[:3])
+
+    log.info("Found %d existing entries.", len(existing_data))
     return existing_data
 
 
@@ -107,7 +113,6 @@ def update_last_run_time(sheets_service, now):
 def publish_history(drive_service, sheets_service):
     tz = pytz.timezone(config.TIMEZONE)
     now = datetime.datetime.now(tz)
-    cutoff = now - datetime.timedelta(hours=config.HISTORY_IN_HOURS)
 
     log.info("--- Starting publish_history ---")
 
@@ -131,20 +136,26 @@ def publish_history(drive_service, sheets_service):
     lines = m3u_parsing.download_m3u_file(drive_service, m3u_file["id"])
     file_date_str = m3u_file["name"].replace(".m3u", "").strip()
 
-    existing_data = read_existing_entries(sheets_service, cutoff)
+    existing_data = read_existing_entries(sheets_service)
     existing_keys = {"||".join(c.strip().lower() for c in r) for r in existing_data}
 
     new_entries = m3u_parsing.parse_m3u_lines(lines, existing_keys, file_date_str)
-    new_entries = [
-        r
-        for r in new_entries
-        if tz.localize(datetime.datetime.strptime(r[0], "%Y-%m-%d %H:%M")) >= cutoff
-    ]
-    log.debug("New entries after filtering: %s", new_entries)
+
+    max_songs = int(getattr(config, "HISTORY_MAX_SONGS", 200) or 200)
+    if max_songs < 1:
+        max_songs = 200
 
     combined = [row[:3] for row in (existing_data + new_entries)]
-    log.debug("Combined entries (first 3): %s", combined[:3])
-    log.info("Total combined entries to write: %d", len(combined))
+
+    # Sort newest -> oldest and keep only the most recent N
+    combined.sort(
+        key=lambda r: _parse_entry_dt(r[0]) or datetime.datetime.min, reverse=True
+    )
+    combined = combined[:max_songs]
+
+    log.info(
+        "Total combined entries to write (capped to %d): %d", max_songs, len(combined)
+    )
 
     write_entries_to_sheet(sheets_service, combined, now)
 
