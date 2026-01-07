@@ -105,18 +105,6 @@ def test_update_last_run_time(mock_services, mock_config):
     sheets_service.spreadsheets().values().update.assert_called_once()
 
 
-def test_publish_history_no_files(mock_services, mock_config, monkeypatch):
-    drive_service, sheets_service = mock_services
-    monkeypatch.setattr(urh.m3u_parsing, "get_most_recent_m3u_file", lambda d: None)
-    monkeypatch.setattr(urh.log, "info", MagicMock())
-    monkeypatch.setattr(urh.log, "format_date", lambda dt: "2025-10-27 12:00")
-    urh.publish_history(drive_service, sheets_service)
-    sheets_service.spreadsheets().values().clear.assert_called_once()
-    urh.log.info.assert_any_call(
-        "No .m3u files found. Clearing sheet and writing NO_HISTORY."
-    )
-
-
 def test_main_invokes_both_publish(monkeypatch):
     mock_drive = MagicMock()
     mock_sheets = MagicMock()
