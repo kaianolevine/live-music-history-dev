@@ -184,8 +184,8 @@ def publish_history(drive_service, sheets_service):
 
     update_last_run_time(sheets_service, now)
 
-    m3u_files = get_all_m3u_files(drive_service)
-    if not m3u_files:
+    m3u_file = m3u_parsing.get_most_recent_m3u_file(drive_service)
+    if not m3u_file:
         log.info("No .m3u files found. Clearing sheet and writing NO_HISTORY.")
         google_sheets.sheets_clear_values(
             sheets_service,
@@ -201,27 +201,20 @@ def publish_history(drive_service, sheets_service):
         )
         return
 
-    log.info("Found %d .m3u files to process.", len(m3u_files))
-
     existing_data = read_existing_entries(sheets_service)
     existing_keys = build_dedup_keys(existing_data)
 
     new_entries: list[list[str]] = []
 
-    # Process oldest -> newest so synthesized timestamps remain sensible within each file
-    # and final sort determines what appears in the sheet.
-    for m3u_file in sorted(m3u_files, key=lambda f: f.get("name", "")):
-        try:
-            lines = m3u_parsing.download_m3u_file(drive_service, m3u_file["id"])
-            file_date_str = m3u_file.get("name", "").replace(".m3u", "").strip()
-            parsed = m3u_parsing.parse_m3u_lines(lines, existing_keys, file_date_str)
-            if parsed:
-                new_entries.extend(parsed)
-                # IMPORTANT: parse_m3u_lines mutates existing_keys, but we also want to ensure
-                # the updated set is used across files to prevent cross-file duplicates.
-            log.info("Parsed %d new entries from %s", len(parsed), m3u_file.get("name"))
-        except Exception as e:
-            log.warning("Failed processing .m3u file %s: %s", m3u_file.get("name"), e)
+    try:
+        lines = m3u_parsing.download_m3u_file(drive_service, m3u_file["id"])
+        file_date_str = m3u_file.get("name", "").replace(".m3u", "").strip()
+        parsed = m3u_parsing.parse_m3u_lines(lines, existing_keys, file_date_str)
+        if parsed:
+            new_entries.extend(parsed)
+        log.info("Parsed %d new entries from %s", len(parsed), m3u_file.get("name"))
+    except Exception as e:
+        log.warning("Failed processing .m3u file %s: %s", m3u_file.get("name"), e)
 
     max_songs = int(getattr(config, "HISTORY_MAX_SONGS", 200) or 200)
     if max_songs < 1:
