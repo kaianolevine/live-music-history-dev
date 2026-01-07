@@ -10,46 +10,6 @@ import pytz
 from googleapiclient.errors import HttpError
 
 
-def get_all_m3u_files(drive_service):
-    """Return all .m3u files in the configured VirtualDJ history folder.
-
-    The returned list is sorted newest-first by filename (YYYY-MM-DD.m3u).
-    """
-    # NOTE: This function intentionally reuses the exact Drive query + folder selection
-    # logic from get_most_recent_m3u_file.
-    files = []
-    folder_id = None
-    results = (
-        drive_service.files()
-        .list(
-            q="mimeType='application/vnd.google-apps.folder' and name='VirtualDJ History'",
-            spaces="drive",
-            fields="files(id, name)",
-        )
-        .execute()
-    )
-    folders = results.get("files", [])
-    if folders:
-        folder_id = folders[0]["id"]
-
-    if folder_id:
-        query = f"'{folder_id}' in parents and name contains '.m3u' and trashed = false"
-        results = (
-            drive_service.files()
-            .list(
-                q=query,
-                spaces="drive",
-                fields="files(id, name)",
-                orderBy="name desc",
-            )
-            .execute()
-        )
-        files = results.get("files", [])
-
-    files = sorted(files, key=lambda f: f.get("name", ""), reverse=True)
-    return files
-
-
 def build_dedup_key(row: list[str]) -> str:
     """Build a stable, case-insensitive dedupe key for [datetime, title, artist]."""
     return "||".join(google_sheets.normalize_cell(c).casefold() for c in row[:3])
@@ -184,7 +144,7 @@ def publish_history(drive_service, sheets_service):
 
     update_last_run_time(sheets_service, now)
 
-    m3u_files = get_all_m3u_files(drive_service)
+    m3u_files = google_sheets.get_all_m3u_files(drive_service)
     if not m3u_files:
         log.info("No .m3u files found. Clearing sheet and writing NO_HISTORY.")
         google_sheets.sheets_clear_values(
