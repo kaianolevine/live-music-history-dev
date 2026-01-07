@@ -20,19 +20,12 @@ def build_dedup_keys(rows: list[list[str]]) -> set[str]:
 
 
 def build_youtube_links(entries):
-    """Build YouTube search URLs.
-
-    NOTE: We intentionally write raw URLs (not =HYPERLINK formulas) because
-    Google Sheets' click/preview redirect layer can be blocked in some
-    environments. Raw URLs tend to open directly across more browsers and
-    network policies.
-    """
     links = []
     for _, title, artist in entries:
         query = urlencode({"search_query": f"{title} {artist}"})
         url = f"https://www.youtube.com/results?{query}"
         log.debug("YouTube link: %s", url)
-        links.append([url])
+        links.append([f'=HYPERLINK("{url}", "YouTube Search")'])
     return links
 
 
