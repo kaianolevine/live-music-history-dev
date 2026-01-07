@@ -184,8 +184,8 @@ def publish_history(drive_service, sheets_service):
 
     update_last_run_time(sheets_service, now)
 
-    m3u_file = m3u_parsing.get_most_recent_m3u_file(drive_service)
-    if not m3u_file:
+    m3u_files = get_all_m3u_files(drive_service)
+    if not m3u_files:
         log.info("No .m3u files found. Clearing sheet and writing NO_HISTORY.")
         google_sheets.sheets_clear_values(
             sheets_service,
@@ -202,25 +202,43 @@ def publish_history(drive_service, sheets_service):
         return
 
     existing_data = read_existing_entries(sheets_service)
-    existing_keys = build_dedup_keys(existing_data)
-
-    new_entries: list[list[str]] = []
-
-    try:
-        lines = m3u_parsing.download_m3u_file(drive_service, m3u_file["id"])
-        file_date_str = m3u_file.get("name", "").replace(".m3u", "").strip()
-        parsed = m3u_parsing.parse_m3u_lines(lines, existing_keys, file_date_str)
-        if parsed:
-            new_entries.extend(parsed)
-        log.info("Parsed %d new entries from %s", len(parsed), m3u_file.get("name"))
-    except Exception as e:
-        log.warning("Failed processing .m3u file %s: %s", m3u_file.get("name"), e)
-
+    # Start with whatever is already in the sheet, and then add new entries from
+    # *all* m3u files (newest-first), stopping once we have enough to write.
     max_songs = int(getattr(config, "HISTORY_MAX_SONGS", 200) or 200)
     if max_songs < 1:
         max_songs = 200
 
-    combined = [row[:3] for row in (existing_data + new_entries)]
+    combined: list[list[str]] = [row[:3] for row in existing_data]
+    seen_keys: set[str] = build_dedup_keys(combined)
+
+    new_entries: list[list[str]] = []
+
+    # Process files newest-first (already sorted in get_all_m3u_files)
+    for m3u_file in m3u_files:
+        # If we already have plenty of rows, we can stop early.
+        # We still do a final sort+cap later, but this keeps Drive calls bounded.
+        if len(combined) + len(new_entries) >= max_songs:
+            break
+
+        try:
+            lines = m3u_parsing.download_m3u_file(drive_service, m3u_file["id"])
+            file_date_str = m3u_file.get("name", "").replace(".m3u", "").strip()
+            parsed = m3u_parsing.parse_m3u_lines(lines, seen_keys, file_date_str)
+
+            if parsed:
+                new_entries.extend(parsed)
+                # Update seen keys so later files (and later parsing) can dedupe
+                # against what we've already accepted.
+                for row in parsed:
+                    seen_keys.add(build_dedup_key(row))
+
+            log.info(
+                "Parsed %d new entries from %s", len(parsed or []), m3u_file.get("name")
+            )
+        except Exception as e:
+            log.warning("Failed processing .m3u file %s: %s", m3u_file.get("name"), e)
+
+    combined = [row[:3] for row in (combined + new_entries)]
 
     # Sort newest -> oldest and keep only the most recent N
     combined.sort(
