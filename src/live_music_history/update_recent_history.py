@@ -80,7 +80,7 @@ def write_entries_to_sheet(sheets_service, entries, now):
             config.LIVE_HISTORY_SPREADSHEET_ID,
             google_sheets.a1_range("D", 5, "D", 5 + len(links) - 1),
             links,
-            value_input_option="RAW",
+            value_input_option="USER_ENTERED",
         )
         log.info("Finished writing entries and links to sheet.")
     except HttpError as e:
