@@ -144,7 +144,7 @@ def publish_history(drive_service, sheets_service):
 
     update_last_run_time(sheets_service, now)
 
-    m3u_files = google_sheets.get_all_m3u_files(drive_service)
+    m3u_files = m3u_parsing.get_all_m3u_files(drive_service)
     if not m3u_files:
         log.info("No .m3u files found. Clearing sheet and writing NO_HISTORY.")
         google_sheets.sheets_clear_values(
