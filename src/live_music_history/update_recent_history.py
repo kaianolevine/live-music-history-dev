@@ -123,7 +123,7 @@ def update_last_run_time(sheets_service, now):
     google_sheets.sheets_update_values(
         sheets_service,
         config.LIVE_HISTORY_SPREADSHEET_ID,
-        "A3",
+        "A1",
         [[log.format_date(now)]],
         value_input_option="RAW",
     )
