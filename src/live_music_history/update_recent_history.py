@@ -164,7 +164,7 @@ def publish_history(drive_service, sheets_service):
     existing_data = read_existing_entries(sheets_service)
     # Start with whatever is already in the sheet, and then add new entries from
     # *all* m3u files (newest-first), stopping once we have enough to write.
-    max_songs = int(getattr(config, "HISTORY_MAX_SONGS", 200) or 200)
+    max_songs = int(getattr(config, "HISTORY_MAX_SONGS", 50) or 50)
     if max_songs < 1:
         max_songs = 200
 
