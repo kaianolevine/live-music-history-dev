@@ -4,61 +4,15 @@ from urllib.parse import urlencode
 import kaiano_common_utils.config as config
 import kaiano_common_utils.google_drive as google_drive
 import kaiano_common_utils.google_sheets as google_sheets
+import kaiano_common_utils.google_sheets.a1_range as a1_range
+import kaiano_common_utils.google_sheets.normalize_cell as normalize_cell
+import kaiano_common_utils.google_sheets.sheets_clear_values as sheets_clear_values
+import kaiano_common_utils.google_sheets.sheets_get_values as sheets_get_values
+import kaiano_common_utils.google_sheets.sheets_update_values as sheets_update_values
 import kaiano_common_utils.logger as log
 import kaiano_common_utils.m3u_parsing as m3u_parsing
 import pytz
 from googleapiclient.errors import HttpError
-
-# --- COMMON HELPERS (good candidates to move into kaiano_common_utils) ---
-
-
-def a1_range(
-    col_start: str,
-    row_start: int,
-    col_end: str | None = None,
-    row_end: int | None = None,
-) -> str:
-    """Build an A1 range like 'A5:C10' or 'A5:C'.
-
-    If row_end is None, returns an open-ended range ending at the given column (e.g., 'A5:C').
-    """
-    if col_end is None:
-        col_end = col_start
-    if row_end is None:
-        return f"{col_start}{row_start}:{col_end}"
-    return f"{col_start}{row_start}:{col_end}{row_end}"
-
-
-def sheets_clear_values(sheets_service, spreadsheet_id: str, a1: str) -> None:
-    sheet = sheets_service.spreadsheets()
-    sheet.values().clear(spreadsheetId=spreadsheet_id, range=a1).execute()
-
-
-def sheets_update_values(
-    sheets_service,
-    spreadsheet_id: str,
-    a1: str,
-    values: list[list[str]],
-    *,
-    value_input_option: str = "RAW",
-) -> None:
-    sheet = sheets_service.spreadsheets()
-    sheet.values().update(
-        spreadsheetId=spreadsheet_id,
-        range=a1,
-        valueInputOption=value_input_option,
-        body={"values": values},
-    ).execute()
-
-
-def sheets_get_values(sheets_service, spreadsheet_id: str, a1: str) -> list[list[str]]:
-    sheet = sheets_service.spreadsheets()
-    result = sheet.values().get(spreadsheetId=spreadsheet_id, range=a1).execute()
-    return result.get("values", [])
-
-
-def normalize_cell(value: str) -> str:
-    return (value or "").strip()
 
 
 def build_dedup_key(row: list[str]) -> str:
