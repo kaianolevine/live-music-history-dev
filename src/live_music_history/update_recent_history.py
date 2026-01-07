@@ -4,11 +4,6 @@ from urllib.parse import urlencode
 import kaiano_common_utils.config as config
 import kaiano_common_utils.google_drive as google_drive
 import kaiano_common_utils.google_sheets as google_sheets
-import kaiano_common_utils.google_sheets.a1_range as a1_range
-import kaiano_common_utils.google_sheets.normalize_cell as normalize_cell
-import kaiano_common_utils.google_sheets.sheets_clear_values as sheets_clear_values
-import kaiano_common_utils.google_sheets.sheets_get_values as sheets_get_values
-import kaiano_common_utils.google_sheets.sheets_update_values as sheets_update_values
 import kaiano_common_utils.logger as log
 import kaiano_common_utils.m3u_parsing as m3u_parsing
 import pytz
@@ -17,7 +12,7 @@ from googleapiclient.errors import HttpError
 
 def build_dedup_key(row: list[str]) -> str:
     """Build a stable, case-insensitive dedupe key for [datetime, title, artist]."""
-    return "||".join(normalize_cell(c).casefold() for c in row[:3])
+    return "||".join(google_sheets.normalize_cell(c).casefold() for c in row[:3])
 
 
 def build_dedup_keys(rows: list[list[str]]) -> set[str]:
@@ -43,10 +38,10 @@ def build_youtube_links(entries):
 
 def write_entries_to_sheet(sheets_service, entries, now):
     log.info("Clearing old entries in sheet range A5:D...")
-    sheets_clear_values(
+    google_sheets.sheets_clear_values(
         sheets_service,
         config.LIVE_HISTORY_SPREADSHEET_ID,
-        a1_range("A", 5, "D"),
+        google_sheets.a1_range("A", 5, "D"),
     )
 
     if not entries:
@@ -56,7 +51,7 @@ def write_entries_to_sheet(sheets_service, entries, now):
             "A5:B5",
             [[log.format_date(now), config.NO_HISTORY]],
         )
-        sheets_update_values(
+        google_sheets.sheets_update_values(
             sheets_service,
             config.LIVE_HISTORY_SPREADSHEET_ID,
             "A5:B5",
@@ -68,13 +63,13 @@ def write_entries_to_sheet(sheets_service, entries, now):
     log.info("Writing %d entries to sheet...", len(entries))
     log.debug(
         "Sheet write range: %s, entries: %s",
-        a1_range("A", 5, "C", 5 + len(entries) - 1),
+        google_sheets.a1_range("A", 5, "C", 5 + len(entries) - 1),
         entries,
     )
-    sheets_update_values(
+    google_sheets.sheets_update_values(
         sheets_service,
         config.LIVE_HISTORY_SPREADSHEET_ID,
-        a1_range("A", 5, "C", 5 + len(entries) - 1),
+        google_sheets.a1_range("A", 5, "C", 5 + len(entries) - 1),
         entries,
         value_input_option="RAW",
     )
@@ -84,13 +79,13 @@ def write_entries_to_sheet(sheets_service, entries, now):
         links = build_youtube_links(entries)
         log.debug(
             "Link write range: %s, links: %s",
-            a1_range("D", 5, "D", 5 + len(links) - 1),
+            google_sheets.a1_range("D", 5, "D", 5 + len(links) - 1),
             links,
         )
-        sheets_update_values(
+        google_sheets.sheets_update_values(
             sheets_service,
             config.LIVE_HISTORY_SPREADSHEET_ID,
-            a1_range("D", 5, "D", 5 + len(links) - 1),
+            google_sheets.a1_range("D", 5, "D", 5 + len(links) - 1),
             links,
             value_input_option="RAW",
         )
@@ -112,10 +107,10 @@ def _parse_entry_dt(value: str) -> datetime.datetime | None:
 
 def read_existing_entries(sheets_service):
     log.info("Reading existing entries from sheet...")
-    values = sheets_get_values(
+    values = google_sheets.sheets_get_values(
         sheets_service,
         config.LIVE_HISTORY_SPREADSHEET_ID,
-        a1_range("A", 5, "C"),
+        google_sheets.a1_range("A", 5, "C"),
     )
 
     existing_data: list[list[str]] = []
@@ -132,7 +127,7 @@ def read_existing_entries(sheets_service):
 
 def update_last_run_time(sheets_service, now):
     log.info("Updating last run time in sheet...")
-    sheets_update_values(
+    google_sheets.sheets_update_values(
         sheets_service,
         config.LIVE_HISTORY_SPREADSHEET_ID,
         "A3",
@@ -152,12 +147,12 @@ def publish_history(drive_service, sheets_service):
     m3u_file = m3u_parsing.get_most_recent_m3u_file(drive_service)
     if not m3u_file:
         log.info("No .m3u files found. Clearing sheet and writing NO_HISTORY.")
-        sheets_clear_values(
+        google_sheets.sheets_clear_values(
             sheets_service,
             config.LIVE_HISTORY_SPREADSHEET_ID,
-            a1_range("A", 5, "D"),
+            google_sheets.a1_range("A", 5, "D"),
         )
-        sheets_update_values(
+        google_sheets.sheets_update_values(
             sheets_service,
             config.LIVE_HISTORY_SPREADSHEET_ID,
             "A5:B5",
