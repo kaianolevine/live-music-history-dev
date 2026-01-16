@@ -169,7 +169,7 @@ def publish_history(g: GoogleAPI):
             break
 
         try:
-            lines = g.drive.download_m3u_file(m3u_file["id"])
+            lines = g.drive.download_m3u_file_data(m3u_file["id"])
             file_date_str = m3u_file.get("name", "").replace(".m3u", "").strip()
             parsed_entries = m3u_tool.parse.parse_m3u_lines(
                 lines, seen_keys, file_date_str
