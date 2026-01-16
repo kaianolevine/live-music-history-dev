@@ -3,10 +3,10 @@ from urllib.parse import urlencode
 
 import kaiano_common_utils.config as config
 import kaiano_common_utils.logger as log
-import kaiano_common_utils.m3u_parsing as m3u_parsing
 import pytz
 from googleapiclient.errors import HttpError
 from kaiano_common_utils.api.google import GoogleAPI
+from kaiano_common_utils.library.vdj.m3u.api import M3UToolbox
 
 
 def normalize_cell(value: str | None) -> str:
@@ -133,10 +133,9 @@ def publish_history(g: GoogleAPI):
     log.info("--- Starting publish_history ---")
 
     update_last_run_time(g, now)
+    m3u_tool = M3UToolbox()
 
-    drive_service = g.drive_service
-
-    m3u_files = m3u_parsing.get_all_m3u_files(drive_service)
+    m3u_files = g.drive.get_all_m3u_files()
     if not m3u_files:
         log.info("No .m3u files found. Clearing sheet and writing NO_HISTORY.")
         g.sheets.clear(
@@ -170,19 +169,18 @@ def publish_history(g: GoogleAPI):
             break
 
         try:
-            lines = m3u_parsing.download_m3u_file(drive_service, m3u_file["id"])
+            lines = g.drive.download_m3u_file(m3u_file["id"])
             file_date_str = m3u_file.get("name", "").replace(".m3u", "").strip()
-            parsed = m3u_parsing.parse_m3u_lines(lines, seen_keys, file_date_str)
+            parsed_entries = m3u_tool.parse.parse_m3u_lines(
+                lines, seen_keys, file_date_str
+            )
+            parsed_rows = [[e.dt, e.title, e.artist] for e in parsed_entries]
 
-            if parsed:
-                new_entries.extend(parsed)
-                # Update seen keys so later files (and later parsing) can dedupe
-                # against what we've already accepted.
-                for row in parsed:
-                    seen_keys.add(build_dedup_key(row))
+            if parsed_rows:
+                new_entries.extend(parsed_rows)
 
             log.info(
-                "Parsed %d new entries from %s", len(parsed or []), m3u_file.get("name")
+                "Parsed %d new entries from %s", len(parsed_rows), m3u_file.get("name")
             )
         except Exception as e:
             log.warning("Failed processing .m3u file %s: %s", m3u_file.get("name"), e)
