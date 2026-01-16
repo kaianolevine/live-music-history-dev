@@ -2,17 +2,21 @@ import datetime
 from urllib.parse import urlencode
 
 import kaiano_common_utils.config as config
-import kaiano_common_utils.google_drive as google_drive
-import kaiano_common_utils.google_sheets as google_sheets
 import kaiano_common_utils.logger as log
 import kaiano_common_utils.m3u_parsing as m3u_parsing
 import pytz
 from googleapiclient.errors import HttpError
+from kaiano_common_utils.api.google import GoogleAPI
+
+
+def normalize_cell(value: str | None) -> str:
+    """Normalize a cell value for dedupe comparisons (stable, whitespace-trimmed)."""
+    return (value or "").strip()
 
 
 def build_dedup_key(row: list[str]) -> str:
     """Build a stable, case-insensitive dedupe key for [datetime, title, artist]."""
-    return "||".join(google_sheets.normalize_cell(c).casefold() for c in row[:3])
+    return "||".join(normalize_cell(c).casefold() for c in row[:3])
 
 
 def build_dedup_keys(rows: list[list[str]]) -> set[str]:
@@ -29,12 +33,10 @@ def build_youtube_links(entries):
     return links
 
 
-def write_entries_to_sheet(sheets_service, entries, now):
+def write_entries_to_sheet(g: GoogleAPI, entries, now):
     log.info("Clearing old entries in sheet range A5:D...")
-    google_sheets.sheets_clear_values(
-        sheets_service,
-        config.LIVE_HISTORY_SPREADSHEET_ID,
-        google_sheets.a1_range("A", 5, "D"),
+    g.sheets.clear(
+        config.LIVE_HISTORY_SPREADSHEET_ID, g.sheets.get_range_format("A", 5, "D")
     )
 
     if not entries:
@@ -44,8 +46,7 @@ def write_entries_to_sheet(sheets_service, entries, now):
             "A5:B5",
             [[log.format_date(now), config.NO_HISTORY]],
         )
-        google_sheets.sheets_update_values(
-            sheets_service,
+        g.sheets.write_values(
             config.LIVE_HISTORY_SPREADSHEET_ID,
             "A5:B5",
             [[log.format_date(now), config.NO_HISTORY]],
@@ -56,13 +57,12 @@ def write_entries_to_sheet(sheets_service, entries, now):
     log.info("Writing %d entries to sheet...", len(entries))
     log.debug(
         "Sheet write range: %s, entries: %s",
-        google_sheets.a1_range("A", 5, "C", 5 + len(entries) - 1),
+        g.sheets.get_range_format("A", 5, "C", 5 + len(entries) - 1),
         entries,
     )
-    google_sheets.sheets_update_values(
-        sheets_service,
+    g.sheets.write_values(
         config.LIVE_HISTORY_SPREADSHEET_ID,
-        google_sheets.a1_range("A", 5, "C", 5 + len(entries) - 1),
+        g.sheets.get_range_format("A", 5, "C", 5 + len(entries) - 1),
         entries,
         value_input_option="RAW",
     )
@@ -72,13 +72,12 @@ def write_entries_to_sheet(sheets_service, entries, now):
         links = build_youtube_links(entries)
         log.debug(
             "Link write range: %s, links: %s",
-            google_sheets.a1_range("D", 5, "D", 5 + len(links) - 1),
+            g.sheets.get_range_format("D", 5, "D", 5 + len(links) - 1),
             links,
         )
-        google_sheets.sheets_update_values(
-            sheets_service,
+        g.sheets.write_values(
             config.LIVE_HISTORY_SPREADSHEET_ID,
-            google_sheets.a1_range("D", 5, "D", 5 + len(links) - 1),
+            g.sheets.get_range_format("D", 5, "D", 5 + len(links) - 1),
             links,
             value_input_option="USER_ENTERED",
         )
@@ -98,12 +97,11 @@ def _parse_entry_dt(value: str) -> datetime.datetime | None:
         return None
 
 
-def read_existing_entries(sheets_service):
+def read_existing_entries(g: GoogleAPI):
     log.info("Reading existing entries from sheet...")
-    values = google_sheets.sheets_get_values(
-        sheets_service,
+    values = g.sheets.read_values(
         config.LIVE_HISTORY_SPREADSHEET_ID,
-        google_sheets.a1_range("A", 5, "C"),
+        g.sheets.get_range_format("A", 5, "C"),
     )
 
     existing_data: list[list[str]] = []
@@ -118,10 +116,9 @@ def read_existing_entries(sheets_service):
     return existing_data
 
 
-def update_last_run_time(sheets_service, now):
+def update_last_run_time(g: GoogleAPI, now):
     log.info("Updating last run time in sheet...")
-    google_sheets.sheets_update_values(
-        sheets_service,
+    g.sheets.write_values(
         config.LIVE_HISTORY_SPREADSHEET_ID,
         "A1",
         [[log.format_date(now)]],
@@ -129,24 +126,23 @@ def update_last_run_time(sheets_service, now):
     )
 
 
-def publish_history(drive_service, sheets_service):
+def publish_history(g: GoogleAPI):
     tz = pytz.timezone(config.TIMEZONE)
     now = datetime.datetime.now(tz)
 
     log.info("--- Starting publish_history ---")
 
-    update_last_run_time(sheets_service, now)
+    update_last_run_time(g, now)
+
+    drive_service = g.drive_service
 
     m3u_files = m3u_parsing.get_all_m3u_files(drive_service)
     if not m3u_files:
         log.info("No .m3u files found. Clearing sheet and writing NO_HISTORY.")
-        google_sheets.sheets_clear_values(
-            sheets_service,
-            config.LIVE_HISTORY_SPREADSHEET_ID,
-            google_sheets.a1_range("A", 5, "D"),
+        g.sheets.clear(
+            config.LIVE_HISTORY_SPREADSHEET_ID, g.sheets.get_range_format("A", 5, "D")
         )
-        google_sheets.sheets_update_values(
-            sheets_service,
+        g.sheets.write_values(
             config.LIVE_HISTORY_SPREADSHEET_ID,
             "A5:B5",
             [[log.format_date(now), config.NO_HISTORY]],
@@ -154,7 +150,7 @@ def publish_history(drive_service, sheets_service):
         )
         return
 
-    existing_data = read_existing_entries(sheets_service)
+    existing_data = read_existing_entries(g)
     # Start with whatever is already in the sheet, and then add new entries from
     # *all* m3u files (newest-first), stopping once we have enough to write.
     max_songs = int(getattr(config, "HISTORY_MAX_SONGS", 50) or 50)
@@ -203,14 +199,13 @@ def publish_history(drive_service, sheets_service):
         "Total combined entries to write (capped to %d): %d", max_songs, len(combined)
     )
 
-    write_entries_to_sheet(sheets_service, combined, now)
+    write_entries_to_sheet(g, combined, now)
 
     log.info("Script finished. Rows written: %d", len(combined))
 
 
 if __name__ == "__main__":
 
-    drive_service = google_drive.get_drive_service()
-    sheets_service = google_sheets.get_sheets_service()
+    g = GoogleAPI.from_env()
 
-    publish_history(drive_service, sheets_service)
+    publish_history(g)
