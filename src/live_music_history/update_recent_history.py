@@ -5,8 +5,8 @@ import kaiano_common_utils.config as config
 import kaiano_common_utils.logger as log
 import pytz
 from googleapiclient.errors import HttpError
-from kaiano_common_utils.api.google import GoogleAPI
-from kaiano_common_utils.library.vdj.m3u.api import M3UToolbox
+from kaiano_common_utils.google import GoogleAPI
+from kaiano_common_utils.vdj.m3u.api import M3UToolbox
 
 
 def normalize_cell(value: str | None) -> str:
