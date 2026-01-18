@@ -2,11 +2,13 @@ import datetime
 from urllib.parse import urlencode
 
 import kaiano.config as config
-import kaiano.logger as log
 import pytz
 from googleapiclient.errors import HttpError
+from kaiano import logger as logger_mod
 from kaiano.google import GoogleAPI
 from kaiano.vdj.m3u.api import M3UToolbox
+
+log = logger_mod.get_logger()
 
 
 def normalize_cell(value: str | None) -> str:
@@ -44,12 +46,12 @@ def write_entries_to_sheet(g: GoogleAPI, entries, now):
         log.debug(
             "Sheet write range: %s, entries: %s",
             "A5:B5",
-            [[log.format_date(now), config.NO_HISTORY]],
+            [[logger_mod.format_date(now), config.NO_HISTORY]],
         )
         g.sheets.write_values(
             config.LIVE_HISTORY_SPREADSHEET_ID,
             "A5:B5",
-            [[log.format_date(now), config.NO_HISTORY]],
+            [[logger_mod.format_date(now), config.NO_HISTORY]],
             value_input_option="RAW",
         )
         return
@@ -121,7 +123,7 @@ def update_last_run_time(g: GoogleAPI, now):
     g.sheets.write_values(
         config.LIVE_HISTORY_SPREADSHEET_ID,
         "A1",
-        [[log.format_date(now)]],
+        [[logger_mod.format_date(now)]],
         value_input_option="RAW",
     )
 
@@ -144,7 +146,7 @@ def publish_history(g: GoogleAPI):
         g.sheets.write_values(
             config.LIVE_HISTORY_SPREADSHEET_ID,
             "A5:B5",
-            [[log.format_date(now), config.NO_HISTORY]],
+            [[logger_mod.format_date(now), config.NO_HISTORY]],
             value_input_option="RAW",
         )
         return
