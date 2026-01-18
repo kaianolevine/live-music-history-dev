@@ -1,12 +1,12 @@
 import datetime
 from urllib.parse import urlencode
 
-import kaiano_common_utils.config as config
-import kaiano_common_utils.logger as log
+import kaiano.config as config
+import kaiano.logger as log
 import pytz
 from googleapiclient.errors import HttpError
-from kaiano_common_utils.google import GoogleAPI
-from kaiano_common_utils.vdj.m3u.api import M3UToolbox
+from kaiano.google import GoogleAPI
+from kaiano.vdj.m3u.api import M3UToolbox
 
 
 def normalize_cell(value: str | None) -> str:
