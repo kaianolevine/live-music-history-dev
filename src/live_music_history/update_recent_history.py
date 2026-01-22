@@ -6,7 +6,7 @@ import pytz
 from googleapiclient.errors import HttpError
 from kaiano import logger as logger_mod
 from kaiano.google import GoogleAPI
-from kaiano.vdj.m3u.api import M3UToolbox
+from kaiano.vdj.m3u import M3UToolbox
 
 log = logger_mod.get_logger()
 
