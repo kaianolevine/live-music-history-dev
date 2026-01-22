@@ -11,6 +11,18 @@ from kaiano.vdj.m3u import M3UToolbox
 log = logger_mod.get_logger()
 
 
+# Helper to ensure rows have exactly 3 columns
+def ensure_row3(row: list[str]) -> list[str]:
+    """Ensure a row has exactly 3 columns: [datetime, title, artist]."""
+    if len(row) >= 3:
+        return row[:3]
+    if len(row) == 2:
+        return [row[0], row[1], ""]
+    if len(row) == 1:
+        return [row[0], "", ""]
+    return ["", "", ""]
+
+
 def normalize_cell(value: str | None) -> str:
     """Normalize a cell value for dedupe comparisons (stable, whitespace-trimmed)."""
     return (value or "").strip()
@@ -18,7 +30,8 @@ def normalize_cell(value: str | None) -> str:
 
 def build_dedup_key(row: list[str]) -> str:
     """Build a stable, case-insensitive dedupe key for [datetime, title, artist]."""
-    return "||".join(normalize_cell(c).casefold() for c in row[:3])
+    dt, title, artist = ensure_row3(row)
+    return "||".join(normalize_cell(c).casefold() for c in [dt, title, artist])
 
 
 def build_dedup_keys(rows: list[list[str]]) -> set[str]:
@@ -27,8 +40,9 @@ def build_dedup_keys(rows: list[list[str]]) -> set[str]:
 
 def build_youtube_links(entries):
     links = []
-    for _, title, artist in entries:
-        query = urlencode({"search_query": f"{title} {artist}"})
+    for row in entries:
+        dt, title, artist = ensure_row3(list(row))
+        query = urlencode({"search_query": f"{title} {artist}".strip()})
         url = f"https://www.youtube.com/results?{query}"
         log.debug("YouTube link: %s", url)
         links.append([f'=HYPERLINK("{url}", "YouTube Search")'])
@@ -108,11 +122,19 @@ def read_existing_entries(g: GoogleAPI):
 
     existing_data: list[list[str]] = []
     for row in values:
-        if len(row) >= 2 and row[1] != config.NO_HISTORY:
-            dt = _parse_entry_dt(row[0])
-            if dt is None:
-                continue
-            existing_data.append(row[:3])
+        if not row:
+            continue
+        # Title is column B; if the row is short, treat missing title as empty.
+        title = row[1] if len(row) > 1 else ""
+        if title == config.NO_HISTORY:
+            continue
+
+        dt_str = row[0]
+        dt = _parse_entry_dt(dt_str)
+        if dt is None:
+            continue
+
+        existing_data.append(ensure_row3(row))
 
     log.info("Found %d existing entries.", len(existing_data))
     return existing_data
@@ -158,7 +180,7 @@ def publish_history(g: GoogleAPI):
     if max_songs < 1:
         max_songs = 200
 
-    combined: list[list[str]] = [row[:3] for row in existing_data]
+    combined: list[list[str]] = [ensure_row3(row) for row in existing_data]
     seen_keys: set[str] = build_dedup_keys(combined)
 
     new_entries: list[list[str]] = []
@@ -187,7 +209,7 @@ def publish_history(g: GoogleAPI):
         except Exception as e:
             log.warning("Failed processing .m3u file %s: %s", m3u_file.get("name"), e)
 
-    combined = [row[:3] for row in (combined + new_entries)]
+    combined = [ensure_row3(row) for row in (combined + new_entries)]
 
     # Sort newest -> oldest and keep only the most recent N
     combined.sort(
