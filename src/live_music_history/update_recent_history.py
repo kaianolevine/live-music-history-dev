@@ -159,9 +159,10 @@ def publish_history(g: GoogleAPI):
     update_last_run_time(g, now)
     m3u_tool = M3UToolbox()
 
-    m3u_files = g.drive.get_all_m3u_files()
-    log.info("Found %d .m3u file(s) from Drive.", len(m3u_files))
-    log.debug(".m3u files: %s", [f.get("name") for f in m3u_files])
+    log.info("[M3U-LIST] Listing .m3u files from Drive folder...")
+    m3u_files = list(g.drive.get_all_m3u_files() or [])
+    log.info("[M3U-LIST] Found %d .m3u file(s) from Drive.", len(m3u_files))
+    log.debug("[M3U-LIST] .m3u files: %s", [f.get("name") for f in m3u_files])
     if not m3u_files:
         log.info("No .m3u files found. Clearing sheet and writing NO_HISTORY.")
         g.sheets.clear(
@@ -189,6 +190,7 @@ def publish_history(g: GoogleAPI):
 
     # Process files newest-first (already sorted in get_all_m3u_files)
     for m3u_file in m3u_files:
+        log.debug("[M3U-LOOP] Processing file: %s", m3u_file.get("name"))
         # Stop early only once we've collected enough *new* rows.
         # The sheet may already have max_songs rows, but we still need to scan
         # for newer tracks to replace older ones.
