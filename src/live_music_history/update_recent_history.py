@@ -1,4 +1,5 @@
 import datetime
+import os
 from urllib.parse import urlencode
 
 import kaiano.config as config
@@ -6,6 +7,7 @@ import pytz
 from googleapiclient.errors import HttpError
 from kaiano import logger as logger_mod
 from kaiano.google import GoogleAPI
+from kaiano.json import create_collection_snapshot, write_json_snapshot
 from kaiano.vdj.m3u import M3UToolbox
 
 log = logger_mod.get_logger()
@@ -47,6 +49,32 @@ def build_youtube_links(entries):
         log.debug("YouTube link: %s", url)
         links.append([f'=HYPERLINK("{url}", "YouTube Search")'])
     return links
+
+
+def write_recent_history_snapshot(entries: list[list[str]]) -> None:
+    """
+    Write a static JSON snapshot of recent history so the website can consume it.
+    Output path can be configured via LIVE_HISTORY_JSON_OUTPUT_PATH; defaults to
+    v1/live-history/recent_history.json (repo-relative).
+    """
+    json_output_path = (
+        os.getenv("LIVE_HISTORY_JSON_OUTPUT_PATH")
+        or "v1/live-history/recent_history.json"
+    )
+
+    snapshot = create_collection_snapshot("entries")
+    snapshot["entries"] = [
+        {"dt": dt, "title": title, "artist": artist}
+        for dt, title, artist in (ensure_row3(r) for r in entries)
+    ]
+
+    try:
+        write_json_snapshot(snapshot, json_output_path)
+        log.info("🧾 Wrote recent history JSON snapshot to: %s", json_output_path)
+    except Exception:
+        log.exception(
+            "Failed to write recent history JSON snapshot to: %s", json_output_path
+        )
 
 
 def write_entries_to_sheet(g: GoogleAPI, entries, now):
@@ -230,6 +258,7 @@ def publish_history(g: GoogleAPI):
     )
 
     write_entries_to_sheet(g, combined, now)
+    write_recent_history_snapshot(combined)
 
     log.info("Script finished. Rows written: %d", len(combined))
 
