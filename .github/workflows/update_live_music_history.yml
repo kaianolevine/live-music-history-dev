@@ -41,15 +41,15 @@ jobs:
 
       - name: Copy JSON snapshot into website repo
         run: |
-          mkdir -p website/v1/live-history
-          cp -f v1/live-history/recent_history.json website/v1/live-history/recent_history.json
+          mkdir -p website/src/v1/live-history
+          cp -f v1/live-history/recent_history.json website/src/v1/live-history/recent_history.json
 
       - name: Commit and push website repo (if changed)
         run: |
           cd website
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add v1/live-history/recent_history.json
+          git add src/v1/live-history/recent_history.json
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
